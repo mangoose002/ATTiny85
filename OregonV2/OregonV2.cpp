@@ -169,10 +169,7 @@ void OregonV2::sendOne(void){
  * \param    data   Data to send
  */
 void OregonV2::sendQuarterMSB(const byte data){
-  (bitRead(data, 4)) ? sendOne() : sendZero();
-  (bitRead(data, 5)) ? sendOne() : sendZero();
-  (bitRead(data, 6)) ? sendOne() : sendZero();
-  (bitRead(data, 7)) ? sendOne() : sendZero();
+  for (int i = 4; i <= 7; bitRead(data, i++) ? sendOne() : sendZero());
 }
 
 /**
@@ -180,10 +177,7 @@ void OregonV2::sendQuarterMSB(const byte data){
  * \param    data   Data to send
  */
 void OregonV2::sendQuarterLSB(const byte data){
-  (bitRead(data, 0)) ? sendOne() : sendZero();
-  (bitRead(data, 1)) ? sendOne() : sendZero();
-  (bitRead(data, 2)) ? sendOne() : sendZero();
-  (bitRead(data, 3)) ? sendOne() : sendZero();
+  for (int i = 0; i <= 3; bitRead(data, i++) ? sendOne() : sendZero());
 }
 
 /******************************************************************/
