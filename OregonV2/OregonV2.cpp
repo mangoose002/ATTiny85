@@ -159,25 +159,12 @@ void OregonV2::sendOne(void){
 }
 
 /**
- * Send a bits quarter (4 bits = MSB from 8 bits value) over RF
- *
- * @param data Source data to process and sent
- */
-
-/**
- * \brief    Send a bits quarter (4 bits = MSB from 8 bits value) over RF
- * \param    data   Data to send
- */
-void OregonV2::sendQuarterMSB(const byte data){
-	for (int i = 4; i <= 7; bitRead(data, i++) ? sendOne() : sendZero());
-}
-
-/**
  * \brief    Send a bits quarter (4 bits = LSB from 8 bits value) over RF
  * \param    data   Data to send
+ * \param    sendMSB Send LSB and MSB
  */
-void OregonV2::sendQuarterLSB(const byte data){
-	for (int i = 0; i <= 3; bitRead(data, i++) ? sendOne() : sendZero());
+void OregonV2::sendQuarter(const byte data, bool sendMSB){
+	for (int i = 0; i <= 3 + (sendMSB ? 4 : 0); bitRead(data, i++) ? sendOne() : sendZero());
 }
 
 /******************************************************************/
@@ -191,8 +178,7 @@ void OregonV2::sendQuarterLSB(const byte data){
  */
 void OregonV2::sendData(byte *data, byte size){
 	for (byte i = 0; i < size; ++i){
-		sendQuarterLSB(data[i]);
-		sendQuarterMSB(data[i]);
+		sendQuarter(data[i], true);
 	}
 }
 
@@ -230,7 +216,7 @@ void OregonV2::sendPostamble(void){
  * \         is include in the Oregon message to send.
  */
 void OregonV2::sendSync(void){
-	sendQuarterLSB(0xA);
+	sendQuarter(0xA, false);
 }
 
 /**

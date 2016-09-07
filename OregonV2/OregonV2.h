@@ -31,8 +31,7 @@ class OregonV2{
 
 		void sendZero(void);
 		void sendOne(void);
-		void sendQuarterMSB(const byte data);
-		void sendQuarterLSB(const byte data);
+		void sendQuarter(const byte data, bool sendMSB);
 		void sendData(byte *data, byte size);
 		void sendOregon();
 		void sendPreamble(void);
