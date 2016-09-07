@@ -2,11 +2,11 @@
 #define __OregonV2__H_
 
 #if defined(ARDUINO) && ARDUINO >= 100
-    #include "Arduino.h"
+#include "Arduino.h"
 #elif defined(ENERGIA) // LaunchPad, FraunchPad and StellarPad specific
-    #include "Energia.h"	
+#include "Energia.h"	
 #else
-    #include "WProgram.h"
+#include "WProgram.h"
 #endif
 
 class OregonV2{
@@ -20,19 +20,18 @@ class OregonV2{
 	private:
 		int txpin;		//For Radio transmission
 		// Buffer for Oregon message
-		#ifdef THN132N
+#ifdef THN132N
 		byte OregonMessageBuffer[8];
-		#else
+#else
 		byte OregonMessageBuffer[9];
-		#endif
+#endif
 
 		const unsigned long TIME    = 512;
 		const unsigned long TWOTIME = TIME * 2;
 
 		void sendZero(void);
 		void sendOne(void);
-		void sendQuarterMSB(const byte data);
-		void sendQuarterLSB(const byte data);
+		void sendQuarter(const byte data, bool sendMSB);
 		void sendData(byte *data, byte size);
 		void sendOregon();
 		void sendPreamble(void);
