@@ -1,6 +1,6 @@
 //#define DEBUG
 #define DHTMODEL dht22
-#define IDHEX    0xA5
+#define IDHEX    0xF0
 
 #ifndef DHTMODEL
 #define DHTMODEL dht22
@@ -39,6 +39,7 @@ Modified by Pierre LENA
 => Only enable ADC converter on VCC read to reduce power consumption
 */
 
+#include <TinyTools.h>
 #include <OregonV2.h>
 #include <avr/sleep.h>
 #include <avr/wdt.h>
@@ -50,64 +51,29 @@ Modified by Pierre LENA
 #include <SoftwareSerial.h>
 #endif
 
-#ifndef cbi
-#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
-#endif
-#ifndef sbi
-#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
-#endif
-
 #define TX_PIN  PB0
 #define DHT_PIN PB1
 #define LED_PIN PB5
 #define SRX_PIN PB3
 #define STX_PIN PB4
 
+#define WDT_RST_COUNT         450  // wdt is set to 8s, 450*8=3600 seconds
 #define WDT_VCC_COUNT         75   // wdt is set to 8s, 8x75=600 seconds
 #define WDT_COUNT             7    // wdt is set to 8s, 8x7=56 seconds
-#define LOW_BATTERY_LEVEL     2600 //mV. Led will flash if battery level is lower than this value
+#define LOW_BATTERY_LEVEL     3200 //mV. Led will flash if battery level is lower than this value
 
 #ifdef DEBUG
 SoftwareSerial   TinySerial(SRX_PIN, STX_PIN);
 #endif
 OregonV2         Radio(TX_PIN);
 
-DHTMODEL         dht;
-volatile boolean lowBattery   = false;
-volatile byte    count        = WDT_COUNT;
-volatile byte    batteryCount = 0;
+DHTMODEL          dht;
+volatile boolean  lowBattery;
+volatile byte     count;
+volatile byte     batteryCount;
+volatile uint16_t resetCount;
 
-//Reads Vcc and return the value in mV
-uint16_t readVcc(void) {
-  uint16_t result;
-
-  //sbi(ADCSRA,ADEN);                    // switch Analog to Digitalconverter ON
-  // Read 1.1V reference against Vcc
-  ADMUX = (0<<REFS0) | (12<<MUX0);
-  delay(2); // Wait for Vref to settle
-  ADCSRA |= (1<<ADSC); // Convert
-  while (bit_is_set(ADCSRA,ADSC));
-  result = ADCW;
-  //cbi(ADCSRA,ADEN);                    // switch Analog to Digitalconverter OFF  
-
-  #ifdef DEBUG
-  TinySerial.print(1018500L / result); TinySerial.println(" mV");
-  #endif
-  
-  return 1018500L / result; // Back-calculate AVcc in mV
-}
-
-//Use to alert of low battery
-void lowBatteryWarning () {
-  pinMode(LED_PIN, OUTPUT);
-  for (byte i = 5 ;  i > 0 ; i--){
-     digitalWrite(LED_PIN, HIGH);
-     delay(250);
-     digitalWrite(LED_PIN, LOW); 
-     delay(250);
-  }
-  pinMode(LED_PIN, INPUT); // reduce power  
-}
+void(*Reboot)(void)=0;             // reset function on adres 0.
 
 // set system into the sleep state
 // system wakes up when wtchdog is timed out
@@ -125,28 +91,9 @@ void system_sleep() {
 
 // Watchdog Interrupt Service / is executed when watchdog timed out
 ISR(WDT_vect) {
+  resetCount--,
   batteryCount--;
   count--;
-}
-
-// 0=16ms, 1=32ms,2=64ms,3=128ms,4=250ms,5=500ms
-// 6=1 sec,7=2 sec, 8=4 sec, 9= 8sec
-void setup_watchdog(int ii) {
-
-  byte bb;
-  int ww;
-  if (ii > 9 ) ii = 9;
-  bb = ii & 7;
-  if (ii > 7) bb |= (1 << 5);
-  bb |= (1 << WDCE);
-  ww = bb;
-
-  MCUSR &= ~(1 << WDRF);
-  // start timed sequence
-  WDTCR |= (1 << WDCE) | (1 << WDE);
-  // set new watchdog timeout value
-  WDTCR = bb;
-  WDTCR |= _BV(WDIE);
 }
 
 /******************************************************************/
@@ -154,13 +101,19 @@ void setup(){
   //Force 8MHz CPU
   cli(); // Disable interrupts
   CLKPR = 0x80; // Prescaler enable
+  delay(5);
   CLKPR = 0x00; // Clock division factor 1
   sei(); // Enable interrupts
 
-  lowBattery = !(readVcc() >= LOW_BATTERY_LEVEL); // Initialize battery level value
-  setup_watchdog(9);                              //Set to 8s
+  lowBattery = !(TinyTools::readVcc() >= LOW_BATTERY_LEVEL); // Initialize battery level value
+  TinyTools::setup_watchdog(9);                              //Set to 8s
   digitalWrite(TX_PIN,LOW);
   Radio.setId(IDHEX); //Set ID
+
+  lowBattery   = false;
+  count        = WDT_COUNT;
+  batteryCount = 0;
+  resetCount   = WDT_RST_COUNT;
 
   #ifdef DEBUG
   TinySerial.begin(9600);
@@ -169,39 +122,60 @@ void setup(){
 }
 
 void loop(){
+  if(resetCount == 0){
+    resetCount = WDT_RST_COUNT;
+    Reboot(); //Reboot every 60 minutes
+  }
+
   if(batteryCount == 0){ //We only read VCC every 10 minutes
     batteryCount = WDT_VCC_COUNT;
-    lowBattery = !(readVcc() >= LOW_BATTERY_LEVEL); // Initialize battery level value
+    lowBattery = !(TinyTools::readVcc() >= LOW_BATTERY_LEVEL); // Initialize battery level value
   }
 
   if(count == 0){
     count = WDT_COUNT;
     if(lowBattery){
-      lowBatteryWarning(); //Blinking led
+      TinyTools::flashLED(LED_PIN,5,250); //Blinking led
     }
 
-    int chk = dht.read(DHT_PIN);
-    if(chk == DHTLIB_OK){
+    float h = 0;
+    float t = 0;
+    int   c = 0;
+    int chk;
+
+    for(int i=0;i<3;i++){
+      chk = dht.read(DHT_PIN);
+      if(chk == DHTLIB_OK && dht.humidity > 5){
+        t+= dht.temperature;
+        h+= dht.humidity;
+        c++;
+      } 
       #ifdef DEBUG
-        TinySerial.print("Temperature : "); TinySerial.print(dht.temperature); TinySerial.write(176); // caractÃƒÂ¨re Ã‚Â°
-        TinySerial.write('C'); TinySerial.println();
-        TinySerial.print("Humidity : "); TinySerial.print(dht.humidity);
-        TinySerial.write('%'); TinySerial.println();
-      #endif
-        Radio.send(dht.temperature,dht.humidity,!lowBattery);
-    } else if(chk == DHTLIB_ERROR_CHECKSUM){
-      #ifdef DEBUG
+        else if(chk == DHTLIB_ERROR_CHECKSUM){
         TinySerial.println("Checksum error");
-      #endif
-    } else if(chk == DHTLIB_ERROR_TIMEOUT){
-      #ifdef DEBUG
+      } else if(chk == DHTLIB_ERROR_TIMEOUT){
         TinySerial.println("Time out error");
-      #endif
-    } else {
-      #ifdef DEBUG
+      } else {
         TinySerial.println("Unknown error");
+      }
       #endif
+      delay(200);
     }
-  }
-  system_sleep();
+    
+    if(c > 1)
+      t = t / c;
+      h = h / c;
+
+      if(h > 5){ //It is a nonsense to have humidity less that 5%
+        #ifdef DEBUG
+          TinySerial.print("Temperature : "); TinySerial.print(t); TinySerial.write(176); // caractère °
+          TinySerial.write('C'); TinySerial.println();
+          TinySerial.print("Humidity : "); TinySerial.print(h);
+          TinySerial.write('%'); TinySerial.println();
+        #endif
+        Radio.send(t,h,!lowBattery);
+      }
+    }
+    
+    system_sleep();
 }
